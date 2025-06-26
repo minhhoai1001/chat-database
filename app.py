@@ -1,65 +1,103 @@
 import gradio as gr
-import random
-import time
-import boto3
+from IPython.display import Image, display
 from langchain_aws import ChatBedrockConverse
 from langchain.schema import HumanMessage, AIMessage
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+from langgraph.graph import END, StateGraph, START
 
-# Initialize Bedrock client
-bedrock_client = boto3.client(
-    service_name='bedrock-runtime',
-    region_name='us-east-1' 
-)
+from src.tools.mysql_client import MySQLClient
+from src.llm import BedrockLLM
+from src.nodes.sql import SQLNode
+from src.nodes.knowledge import KnowledgeNode
+from src.conditional.router import Router
+from src.state import GraphState
 
-# Initialize BedrockChat
-llm = ChatBedrockConverse(
-    client=bedrock_client,
-    model_id="us.meta.llama4-maverick-17b-instruct-v1:0",
-    temperature=0.1,
-    max_tokens=512
-)
+load_dotenv()
 
-def format_history(history):
-    formatted_history = []
-    for human, ai in history:
-        formatted_history.append(HumanMessage(content=human))
-        if ai:
-            formatted_history.append(AIMessage(content=ai))
-    return formatted_history
+class ChatDatabaseAgent:
+    def __init__(self, model_id="us.meta.llama4-maverick-17b-instruct-v1:0", temperature=0.1, max_tokens=512):
+        self.llm = BedrockLLM(model_id=model_id, temperature=temperature, max_tokens=max_tokens)
+        self.sql_node = SQLNode()
+        self.knowledge_node = KnowledgeNode()
+        self.router = Router()
+        self.workflow = StateGraph(GraphState)
+        
+        self.build_graph()
+    
+    
+    def build_graph(self):
+        self.workflow.add_node("sqlGenerateAgent", self.sql_node.generate_sql_query)
+        self.workflow.add_node("sqlExecuteAgent", self.sql_node.execute_query)
+        self.workflow.add_node("knowledgeAgent", self.knowledge_node.run)
+        self.workflow.add_node("syntheticAnswerAgent", self.sql_node.synthetic_answer)
+        
+        self.workflow.set_conditional_entry_point(
+            self.router.route,
+            {
+                "sql": "sqlGenerateAgent",
+                "knowledge": "knowledgeAgent",
+            }
+        )
+        
+        self.workflow.add_edge("sqlGenerateAgent", "sqlExecuteAgent")
+        self.workflow.add_edge("sqlExecuteAgent", "syntheticAnswerAgent")
+        
+        self.workflow.add_conditional_edges(
+            "sqlExecuteAgent",
+            self.sql_node.handle_sql_error,
+            {
+                "error": "sqlExecuteAgent",
+                "max_retries": END,
+                "success": "syntheticAnswerAgent",
+            }
+        )
+        
+        self.graph = self.workflow.compile()
+        
+    def run(self, state: GraphState):
+        return self.graph.invoke(state)
+    
 
-def respond(message, history):
-    try:
-        messages = format_history(history)
-        messages.append(HumanMessage(content=message))
+    def respond(self, message, history):
+        """
+        Main response method for the chat interface.
+        
+        Args:
+            message (str): User's message
+            history (list): Conversation history
+            
+        Yields:
+            str: Streaming response
+        """
+        try:
+            response = self.run({"question": message})
+            text = ""
+            for key, item in response.items():
+                text += f"{key}: {item}\n"
+                
+                yield text
+            
+        except Exception as e:
+            yield f"Error: {str(e)}"
 
-        partial_response = ""
-        for chunk in llm.stream(messages):
-            if hasattr(chunk, 'content'):
-                chunk_content = chunk.content
-                if isinstance(chunk_content, list):
-                    # Safely extract string parts from list of dicts or strings
-                    chunk_content = ''.join(
-                        item["text"] if isinstance(item, dict) and "text" in item else str(item)
-                        for item in chunk_content
-                    )
-            else:
-                chunk_content = str(chunk)
 
-            partial_response += chunk_content
-            yield partial_response
+# Initialize the agent
+agent = ChatDatabaseAgent()
+# Save the graph visualization to a PNG file
+with open("graph.png", "wb") as f:
+    f.write(agent.graph.get_graph().draw_mermaid_png())
 
-    except Exception as e:
-        yield f"Error: {str(e)}"
 
 # Create the Gradio interface
 demo = gr.ChatInterface(
-    fn=respond,
-    title="Amazon Bedrock Chat",
-    description="Chat interface using Amazon Bedrock with LLAMA 4",
+    fn=agent.respond,
+    title="Amazon Bedrock Chat Database Agent",
+    description="Chat interface using Amazon Bedrock with LLAMA 4 for database queries",
     examples=[
-        ["What is quantum computing?"],
-        ["Explain machine learning in simple terms"],
-        ["What are the best practices for cloud security?"],
+        ["How many projects are active?"],
+        ["What are the recent exports?"],
+        ["Count the total number of records"],
     ],
     theme="soft"
 )
