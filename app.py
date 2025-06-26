@@ -1,12 +1,10 @@
 import gradio as gr
-from IPython.display import Image, display
-from langchain_aws import ChatBedrockConverse
 from langchain.schema import HumanMessage, AIMessage
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph, START
+from langgraph.checkpoint.memory import MemorySaver
 
-from src.tools.mysql_client import MySQLClient
 from src.llm import BedrockLLM
 from src.nodes.sql import SQLNode
 from src.nodes.knowledge import KnowledgeNode
@@ -22,7 +20,7 @@ class ChatDatabaseAgent:
         self.knowledge_node = KnowledgeNode()
         self.router = Router()
         self.workflow = StateGraph(GraphState)
-        
+        self.memory = MemorySaver()
         self.build_graph()
     
     
@@ -53,10 +51,11 @@ class ChatDatabaseAgent:
             }
         )
         
-        self.graph = self.workflow.compile()
+        self.graph = self.workflow.compile(checkpointer=self.memory)
         
-    def run(self, state: GraphState):
-        return self.graph.invoke(state)
+    def run(self, state: GraphState, thread_id:str = "1"):
+        config = {"configurable": {"thread_id": thread_id}}
+        return self.graph.invoke(state, config)
     
 
     def respond(self, message, history):

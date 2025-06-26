@@ -46,7 +46,7 @@ class SQLNode():
         """
         try:
             result = self.mysql_client.run_query(state["sql_query"])
-            return {"sql_retriever": result, "loop_step": state.get("loop_step", 0) + 1}
+            return {"sql_retriever": result}
         
         except Exception as e:
             return {"sql_retriever": f"Error executing query: {str(e)}", "loop_step": state.get("loop_step", 0) + 1}
@@ -59,6 +59,7 @@ class SQLNode():
         """ 
         # Check if we've exceeded max retries
         if state.get("loop_step", 0) >= 3:
+            state['loop_step'] = 0
             return "max_retries"
         
         # Check if there was an error in the query result
