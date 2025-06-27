@@ -1,8 +1,6 @@
 import gradio as gr
-from langchain.schema import HumanMessage, AIMessage
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
-from langgraph.graph import END, StateGraph, START
+from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
 from src.llm import BedrockLLM
@@ -70,7 +68,7 @@ class ChatDatabaseAgent:
             str: Streaming response
         """
         try:
-            response = self.run({"question": message})
+            response = self.run({"question": message, "max_retries": 3})
             text = ""
             for key, item in response.items():
                 text += f"{key}: {item}\n"
@@ -96,7 +94,7 @@ demo = gr.ChatInterface(
     examples=[
         ["How many projects are active?"],
         ["What are the recent exports?"],
-        ["Count the total number of records"],
+        ["Count the total number of scans?"],
     ],
     theme="soft"
 )

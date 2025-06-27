@@ -6,14 +6,6 @@ from src.state import GraphState
 from src.llm import BedrockLLM
 from src.tools.mysql_client import MySQLClient
 
-sql_prompt = """
-Based on the table schema below, write a SQL query that would answer the user's question:
-{schema}
-
-Question: {question}
-Only return the SQL query, no other text like ```sql.
-"""
-
 class SQLNode():
     def __init__(self):
         self.llm = BedrockLLM()
@@ -29,16 +21,35 @@ class SQLNode():
         Generate a SQL query based on the user's question.
         
         Args:
-            question (str): The user's question
+            state (GraphState): The current graph state containing the question
             
         Returns:
-            str: Generated SQL query
+            Dict[str, Any]: Dictionary containing the generated SQL query and updated history
         """
+        history = state.get("history", [])
         question = state["question"]
-        prompt_template = sql_prompt.format(schema=self.schema, question=question)
-        sql_response = self.llm.invoke(prompt_template)
+        history.extend([
+            f"Human: {question}"
+        ])
+        # Create system and human messages
+        system_message = SystemMessage(content=f"Based on the table schema below, write a SQL query that would answer the chat history. Only return the SQL query, no other text like ```sql.\n\nSchema:\n{self.schema}")
+        human_message = HumanMessage(content="\n".join(history))
         
-        return {"sql_query": sql_response.content}
+        # Create messages list for the conversation
+        messages = [system_message, human_message]
+        
+        # Invoke LLM with messages
+        sql_response = self.llm.invoke(messages)
+        
+        # Update history with the conversation
+        history.extend([
+            f"SQL Query: {sql_response.content}"
+        ])
+        
+        return {
+            "sql_query": sql_response.content,
+            "history": history
+        }
     
     def execute_query(self, state: GraphState) -> Dict[str, Any]:
         """
@@ -46,7 +57,11 @@ class SQLNode():
         """
         try:
             result = self.mysql_client.run_query(state["sql_query"])
-            return {"sql_retriever": result}
+            history = state.get("history", [])
+            history.extend([
+                f"SQL Query Result: {result}"
+            ])
+            return {"sql_retriever": result, "history": history}
         
         except Exception as e:
             return {"sql_retriever": f"Error executing query: {str(e)}", "loop_step": state.get("loop_step", 0) + 1}
@@ -58,32 +73,30 @@ class SQLNode():
         Uses LLM to edit the query and retry up to 3 times.
         """ 
         # Check if we've exceeded max retries
-        if state.get("loop_step", 0) >= 3:
+        max_retries = state.get("max_retries", 3)
+        if state.get("loop_step", 0) >= max_retries:
             state['loop_step'] = 0
             return "max_retries"
         
         # Check if there was an error in the query result
         query_result = state.get("sql_retriever", "")
-        print("==> query_result: ", query_result)
         
         if query_result and query_result.startswith("Error executing query:"):
             # Use LLM to fix the SQL query
             error_message = query_result
             original_query = state.get("sql_query", "")
             
-            fix_prompt = f"""
-            The following SQL query failed with error: {error_message}
+            # Create system and human messages
+            system_message = SystemMessage(content="Please fix the SQL query to resolve the error. Only return the corrected SQL query, no other text like ```sql.")
+            human_message = HumanMessage(content=f"The following SQL query failed with error: {error_message}\n\nOriginal query: {original_query}")
             
-            Original query: {original_query}
-            
-            Please fix the SQL query to resolve the error. Only return the corrected SQL query, no other text like ```sql.
-            """
+            # Create messages list for the conversation
+            messages = [system_message, human_message]
             
             try:
-                fixed_query = self.llm.invoke(fix_prompt)
+                fixed_query = self.llm.invoke(messages)
                 # Update the state with the fixed query
                 state["sql_query"] = fixed_query.content
-                print("==> fixed_query: ", state["sql_query"])
                 return "error"  # Retry with the fixed query
             except Exception as e:
                 return "max_retries"  # If fixing fails, give up
@@ -95,14 +108,26 @@ class SQLNode():
         """
         Callback function to handle SQL query success.
         """
-        question = state["question"]
-        sql_retriever = state["sql_retriever"]
-        answer_prompt = f"""
-        Based on the SQL query result below, answer the user's question:    
-        {sql_retriever}
+        # Create system and human messages
+        chat_history = "\n".join(state['history'])
+        system_message = SystemMessage(content="You are insightScanX AI that answers the question based on the chat history")
+        human_message = HumanMessage(content=f"Chat History:\n{chat_history}\n Answer the question clearly and concisely based on the chat history.")
         
-        Question: {question}
-        Answer the question shorly and concisely.
-        """
-        answer = self.llm.invoke(answer_prompt)
-        return {"answer": answer.content}
+        # Create messages list for the conversation
+        messages = [system_message, human_message]
+        # Invoke LLM with messages
+        answer = self.llm.invoke(messages)
+        
+        # Update history with the conversation
+        history = state.get("history", [])
+        history.extend([
+            f"Assistant: {answer.content}"
+        ])
+        
+        # Keep only the latest 4 values in the history list
+        history = history[-4:] if len(history) > 4 else history
+        
+        return {
+            "answer": answer.content,
+            "history": history
+        }

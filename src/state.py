@@ -13,3 +13,4 @@ class GraphState(TypedDict):
     max_retries: int  # Max number of retries for answer generation
     loop_step: Annotated[int, operator.add]
     documents: List[str]  # List of retrieved documents
+    history: List[str]  # List of messages in the conversation
