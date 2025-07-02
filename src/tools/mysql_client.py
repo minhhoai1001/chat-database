@@ -19,13 +19,13 @@ class MySQLClient():
         return self.db.run(query)
 
 
-
 if __name__ == "__main__":
     MYSQL_SERVER = os.environ['MYSQL_SERVER']
     MYSQL_PORT = os.environ['MYSQL_PORT']
     MYSQL_PASSWORD = os.environ['MYSQL_PASSWORD']
     
     mysql_client = MySQLClient(MYSQL_SERVER, MYSQL_PORT, MYSQL_PASSWORD)
-    # print(mysql_client.get_table_info())
-    retries = mysql_client.run_query("SELECT * FROM project_export_history LIMIT 2")
-    print(retries)
+    # Save schema to a text file with UTF-8 encoding
+    with open("schema.txt", "w", encoding="utf-8") as f:
+        f.write(mysql_client.get_table_info())
+    print("Schema saved to schema.txt")

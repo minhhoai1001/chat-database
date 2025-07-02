@@ -1,5 +1,9 @@
 import boto3
+import numpy as np
 from langchain_aws import ChatBedrockConverse
+from langchain_aws import BedrockEmbeddings
+from fastembed import TextEmbedding
+from langchain.embeddings.base import Embeddings
 
 class LLM:
     def invoke(self, prompt):
@@ -55,4 +59,28 @@ class BedrockLLM(LLM):
     
     def stream(self, prompt):
         return self.llm.stream(prompt)
+
+class BedrockEmbeddings(Embeddings):
+    def __init__(self, model_id="amazon.titan-embed-text-v1"):
+        self.model_id = model_id
+        self.embeddings = BedrockEmbeddings(
+            client=self.bedrock_client,
+            model_id=self.model_id
+        )
+        
+    def embed_query(self, text: str):
+        return self.embeddings.embed_query(text)
+    
+    def embed_documents(self, documents: list[str]):
+        return self.embeddings.embed_documents(documents)
+    
+class QdrantEmbeddings(Embeddings):
+    def __init__(self, model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
+        self.model = TextEmbedding(model_name=model_name)
+        
+    def embed_query(self, text: str) -> list[float]:
+        return list(self.model.embed(text))[0]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [list(self.model.embed(text))[0] for text in texts]
     

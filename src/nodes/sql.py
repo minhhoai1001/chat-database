@@ -1,10 +1,11 @@
-import os
+import os, json
 from typing import Any, Dict
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.state import GraphState
 from src.llm import BedrockLLM
 from src.tools.mysql_client import MySQLClient
+from src.tools.qdrant_client import QdrantVectorTool
 
 class SQLNode():
     def __init__(self):
@@ -14,7 +15,30 @@ class SQLNode():
             os.environ['MYSQL_PORT'], 
             os.environ['MYSQL_PASSWORD']
         )
-        self.schema = self.mysql_client.get_table_info()
+        self.qdrant_client = QdrantVectorTool(url="localhost", port=6333, collection_name="client_ddl")
+        # self.schema = self.mysql_client.get_table_info()
+    
+    def get_schema(self, question: str) -> str:
+        docs = self.qdrant_client.search_embedding(question)
+        description = ""
+        for item in docs:
+            description += item.payload["description"] + "\n"
+        
+        system_message = SystemMessage(content=f"""You are a database expert.
+        Given a user question and a list of table descriptions, select only the table(s) that are most relevant to answering the question.
+        Respond with a **Python list of table names**, e.g. ["orders", "products"].  
+        Do not include any explanation or extra text.
+        If no table is relevant, return an empty list [].""")
+        human_message = HumanMessage(content=f"User question: {question}\nTable descriptions: {description}")
+        
+        messages = [system_message, human_message]
+        data = self.llm.invoke(messages)
+        table_names = json.loads(data.content)
+        schema = ""
+        for name in table_names:
+            dll = self.qdrant_client.get_dll_by_name(name)
+            schema += dll + "\n"
+        return schema
     
     def generate_sql_query(self, state: GraphState) -> Dict[str, Any]:
         """
@@ -26,13 +50,19 @@ class SQLNode():
         Returns:
             Dict[str, Any]: Dictionary containing the generated SQL query and updated history
         """
+        # schema = self.get_schema(state["question"])
+        
         history = state.get("history", [])
         question = state["question"]
-        history.extend([
-            f"Human: {question}"
-        ])
+        history.extend([f"Human: {question}"])
+        
+        docs = self.qdrant_client.search_embedding(question)
+        schema = ""
+        for item in docs:
+            schema += item.payload["dll"] + "\n"
+        print("==> schema: ", schema)
         # Create system and human messages
-        system_message = SystemMessage(content=f"Based on the table schema below, write a SQL query that would answer the chat history. Only return the SQL query, no other text like ```sql.\n\nSchema:\n{self.schema}")
+        system_message = SystemMessage(content=f"Based on the table schema below, write a SQL query that would answer the chat history. Only return the SQL query, no other text like ```sql.\n\nSchema:\n{schema}")
         human_message = HumanMessage(content="\n".join(history))
         
         # Create messages list for the conversation
@@ -40,6 +70,8 @@ class SQLNode():
         
         # Invoke LLM with messages
         sql_response = self.llm.invoke(messages)
+        
+        print("==> SQL query tokens: ", sql_response.usage_metadata)
         
         # Update history with the conversation
         history.extend([
@@ -117,6 +149,8 @@ class SQLNode():
         messages = [system_message, human_message]
         # Invoke LLM with messages
         answer = self.llm.invoke(messages)
+        
+        print("==> answer tokens: ", answer.usage_metadata)
         
         # Update history with the conversation
         history = state.get("history", [])
