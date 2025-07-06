@@ -4,6 +4,7 @@ from langchain_aws import ChatBedrockConverse
 from langchain_aws import BedrockEmbeddings
 from fastembed import TextEmbedding
 from langchain.embeddings.base import Embeddings
+from FlagEmbedding import BGEM3FlagModel
 
 class LLM:
     def invoke(self, prompt):
@@ -84,3 +85,12 @@ class QdrantEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [list(self.model.embed(text))[0] for text in texts]
     
+class HybridEmbeddings():
+    def __init__(self, model_name="BAAI/bge-m3"):
+        self.model = BGEM3FlagModel(model_name, use_fp16=True, force_download=True)
+        
+    def embed_query(self, text: str):
+        return self.model.encode(text, return_dense=True, return_sparse=True, return_colbert_vecs=True)
+    
+    def embed_documents(self, texts: list[str]):
+        return self.model.encode(texts, return_dense=True, return_sparse=True, return_colbert_vecs=True)

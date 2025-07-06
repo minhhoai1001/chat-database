@@ -43,10 +43,8 @@ class SQLNode():
     def generate_sql_query(self, state: GraphState) -> Dict[str, Any]:
         """
         Generate a SQL query based on the user's question.
-        
         Args:
             state (GraphState): The current graph state containing the question
-            
         Returns:
             Dict[str, Any]: Dictionary containing the generated SQL query and updated history
         """

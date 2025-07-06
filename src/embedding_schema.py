@@ -48,20 +48,6 @@ if __name__ == "__main__":
     schema = mysql_client.get_table_info()
     
     llm = BedrockLLM()
-    # prompt = """
-    # You are a data analyst assistant. Your task is to generate a short and clear description of the purpose of a database table.
-
-    # You will receive 3 sample rows from a SQL table. Based only on this sample data, describe what this table is likely used for in 1-2 concise sentences. Focus on:
-    # - What kind of information the table stores
-    # - What its likely role is in a system
-    # - Keywords that might be useful when selecting it for user questions
-
-    # Avoid repeating values from the sample. Do not speculate beyond the data shown.
-
-    # Format your answer as a single short paragraph, no more than 2 sentences.
-
-    # Only output the description. Do not include the data in your answer.
-    # """
     
     prompt = """
     You are a database expert helping summarize SQL table schemas for language models.
@@ -73,15 +59,11 @@ if __name__ == "__main__":
     Only include relevant and useful information. Avoid unnecessary SQL syntax or low-level implementation details.
     """
     
-    # data = qdrant_client.search_embedding("Which is the most recent scan?")
-    # for item in data:
-    #     print(item.score)
-    #     print(item.payload)
-    #     print("-"*100)
-    
     # print(schema)
     # tables = extract_tables(schema)
+    # schema_description = []
     # for table in tables:
+        
     #     print("-"*100)
     #     dll = table["dll"]
     #     sample = table["sample"]
@@ -91,9 +73,21 @@ if __name__ == "__main__":
     #     human = HumanMessage(content=f"Here is the input SQL schema: {dll}")
     #     response = llm.invoke([system, human])
     #     print(response.content)
-    #     qdrant_client.add_embedding(name, response.content, dll)
-    names = ['projects', "scans"]
-    for name in names:
-        data = qdrant_client.get_dll_by_name(name)
-        print(data)
-        print("-"*100)
+    #     description = {
+    #         "name": name,
+    #         "description": response.content,
+    #         "dll": dll,
+    #     }
+    #     schema_description.append(description)
+    
+    # with open("schema_description.json", "w") as f:
+    #     json.dump(schema_description, f, indent=4)
+    
+    data = json.load(open("schema/schema_description.json"))    
+    for item in data:
+        name = item["name"]
+        dll = item["dll"]
+        description = item["description"]
+        print(name, description)
+        qdrant_client.add_embedding(name, description, dll)
+     
