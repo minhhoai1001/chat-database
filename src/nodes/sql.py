@@ -1,4 +1,4 @@
-import os, json
+import os, json, datetime
 from typing import Any, Dict
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -6,6 +6,7 @@ from src.state import GraphState
 from src.llm import BedrockLLM
 from src.tools.mysql_client import MySQLClient
 from src.tools.qdrant_client import QdrantVectorTool
+from src.tools.mongo_client import MongoDBClient
 
 class SQLNode():
     def __init__(self):
@@ -16,6 +17,10 @@ class SQLNode():
             os.environ['MYSQL_PASSWORD']
         )
         self.qdrant_client = QdrantVectorTool(url="localhost", port=6333, collection_name="client_ddl")
+        self.mongo_client = MongoDBClient(
+            uri=os.environ['MONGO_URI'], 
+            db_name=os.environ['MONGO_DB']
+        )
         # self.schema = self.mysql_client.get_table_info()
     
     def get_schema(self, question: str) -> str:
@@ -54,11 +59,11 @@ class SQLNode():
         question = state["question"]
         history.extend([f"Human: {question}"])
         
-        docs = self.qdrant_client.search_embedding(question)
+        docs = self.qdrant_client.search_hybrid(question, limit=10)
         schema = ""
         for item in docs:
             schema += item.payload["dll"] + "\n"
-        print("==> schema: ", schema)
+        # print("==> schema: \n", schema)
         # Create system and human messages
         system_message = SystemMessage(content=f"Based on the table schema below, write a SQL query that would answer the chat history. Only return the SQL query, no other text like ```sql.\n\nSchema:\n{schema}")
         human_message = HumanMessage(content="\n".join(history))
@@ -70,7 +75,7 @@ class SQLNode():
         sql_response = self.llm.invoke(messages)
         
         print("==> SQL query tokens: ", sql_response.usage_metadata)
-        
+        print("==> SQL query: ", sql_response.content)
         # Update history with the conversation
         history.extend([
             f"SQL Query: {sql_response.content}"
@@ -158,6 +163,16 @@ class SQLNode():
         
         # Keep only the latest 4 values in the history list
         history = history[-4:] if len(history) > 4 else history
+        
+        document = {
+            "timestamp": datetime.datetime.now(),
+            "user_id": "12345",
+            "question": state["question"],
+            "sql_query": state["sql_query"],
+            "answer": answer.content
+        }
+        
+        self.mongo_client.insert_document("chat_collection", document)
         
         return {
             "answer": answer.content,
